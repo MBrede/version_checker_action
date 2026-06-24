@@ -89,10 +89,20 @@ class CheckResult:
 
 # ── File discovery ─────────────────────────────────────────────────────────────
 
+_PEP723_RE = re.compile(r'^# /// script\s*\n((?:#[^\n]*\n)*?)# ///', re.MULTILINE)
+
+def _has_pep723_block(path: str) -> bool:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return "# /// script" in f.read(4096)
+    except OSError:
+        return False
+
 def discover_files(root: str) -> dict[str, list[str]]:
-    found: dict[str, list[str]] = {"requirements": [], "pyproject": [], "workflows": []}
+    found: dict[str, list[str]] = {
+        "requirements": [], "pyproject": [], "workflows": [], "scripts": []
+    }
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        # Check if we're inside a .github/workflows directory
         rel = os.path.relpath(dirpath, root)
         parts = rel.replace("\\", "/").split("/")
         in_workflows = (
@@ -114,10 +124,8 @@ def discover_files(root: str) -> dict[str, list[str]]:
                 found["pyproject"].append(fpath)
             elif in_workflows and fname.endswith((".yml", ".yaml")):
                 found["workflows"].append(fpath)
-
-        # Also detect .github/workflows anywhere in tree
-        if ".github" in dirnames:
-            pass  # os.walk will recurse into it
+            elif fname.endswith(".py") and _has_pep723_block(fpath):
+                found["scripts"].append(fpath)
 
     return found
 
@@ -207,6 +215,51 @@ def parse_pyproject_toml(path: str) -> list[Dependency]:
             source_file=path,
             source_line=0,
         ))
+
+    return deps
+
+def parse_inline_script_metadata(path: str) -> list[Dependency]:
+    """Parse PEP 723 inline script metadata (# /// script blocks) from a .py file."""
+    if tomllib is None:
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except OSError as e:
+        print(f"Warning: cannot read {path}: {e}", file=sys.stderr)
+        return []
+
+    m = _PEP723_RE.search(content)
+    if not m:
+        return []
+
+    toml_lines = []
+    for line in m.group(1).splitlines():
+        toml_lines.append(line[2:] if line.startswith("# ") else ("" if line == "#" else line))
+
+    try:
+        data = tomllib.loads("\n".join(toml_lines))
+    except Exception as e:
+        print(f"Warning: cannot parse PEP 723 block in {path}: {e}", file=sys.stderr)
+        return []
+
+    deps: list[Dependency] = []
+    start_line = content[: m.start()].count("\n") + 1
+
+    for i, entry in enumerate(data.get("dependencies", []), start_line + 1):
+        if not isinstance(entry, str):
+            continue
+        try:
+            req = Requirement(entry)
+            deps.append(Dependency(
+                name=req.name,
+                specifier=str(req.specifier),
+                kind=DepKind.PYTHON,
+                source_file=path,
+                source_line=i,
+            ))
+        except InvalidRequirement:
+            pass
 
     return deps
 
@@ -615,6 +668,9 @@ def main() -> int:
 
     for path in discovered["workflows"]:
         file_to_deps[path] = parse_workflow_yml(path)
+
+    for path in discovered["scripts"]:
+        file_to_deps[path] = parse_inline_script_metadata(path)
 
     all_deps = [dep for deps in file_to_deps.values() for dep in deps]
 

@@ -5,6 +5,7 @@ Checks Python requirements and GitHub Actions workflows for outdated or missing 
 Scans recursively for:
 - `requirements*.txt` — checked against [PyPI](https://pypi.org)
 - `pyproject.toml` — PEP 621 and Poetry dependency tables
+- `*.py` with `# /// script` blocks — [PEP 723](https://peps.python.org/pep-0723/) inline script metadata
 - `.github/workflows/*.yml` — `uses:` directives checked against GitHub
 
 Reports `OK` / `OUTDATED` / `NOT_FOUND` / `ERROR` per dependency.
@@ -179,11 +180,17 @@ requests     >=2.28.0     2.28.2     2.32.3     OUTDATED
 pydantic     ^2.0         2.6.1      2.6.1      OK
 nonexistent  ==1.0        -          -          NOT_FOUND
 
+── check.py ──────────────────────────────────────────────
+Package      Specifier    Current    Latest     Status
+─────────────────────────────────────────────────────────
+requests     -            -          2.32.3     OK
+PyYAML       -            -          6.0.3      OK
+
 ── .github/workflows/ci.yml ─────────────────────────────
 Action                   Ref    Latest    Status
 ─────────────────────────────────────────────────────────
 actions/checkout         v4     v6        OUTDATED
 actions/setup-python     v5     v5        OK
 
-Summary: 5 checked — 2 OK, 2 OUTDATED, 1 NOT_FOUND, 0 ERROR
+Summary: 7 checked — 4 OK, 2 OUTDATED, 1 NOT_FOUND, 0 ERROR
 ```
