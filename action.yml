@@ -1,0 +1,103 @@
+name: 'Check Dependencies'
+description: 'Check Python deps (requirements*.txt, pyproject.toml) and GitHub Actions workflows against PyPI and GitHub for outdated or missing packages.'
+
+inputs:
+  path:
+    description: 'Directory to scan (default: repo root)'
+    required: false
+    default: '.'
+  github-token:
+    description: 'GitHub token for Actions registry checks (avoids rate limiting)'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Run dependency check
+      shell: bash
+      env:
+        DEPS_JSON: ${{ runner.temp }}/deps.json
+        UV_STDERR: ${{ runner.temp }}/uv_stderr.txt
+      run: |
+        uv run "${{ github.action_path }}/check.py" \
+          --path "${{ inputs.path }}" \
+          --json \
+          --github-token "${{ inputs.github-token }}" \
+          > "$DEPS_JSON" 2>"$UV_STDERR" || true
+
+    - name: Emit annotations and summary
+      shell: python
+      env:
+        DEPS_JSON: ${{ runner.temp }}/deps.json
+        UV_STDERR: ${{ runner.temp }}/uv_stderr.txt
+      run: |
+        import json, sys, os
+
+        try:
+            with open(os.environ["DEPS_JSON"]) as f:
+                report = json.load(f)
+        except Exception as e:
+            stderr = open(os.environ["UV_STDERR"]).read().strip()
+            print(f"::error::Failed to parse check output: {e}")
+            if stderr:
+                print(f"::error::uv stderr: {stderr}")
+            sys.exit(1)
+
+        has_errors = False
+
+        for file in report["files"]:
+            for r in file["results"]:
+                path  = file["path"]
+                line  = r.get("source_line") or 1
+                name  = r["name"]
+                status = r["status"]
+                detail = r.get("detail") or ""
+                latest  = r.get("latest_version") or "?"
+                current = r.get("current_version") or r.get("specifier") or "?"
+
+                if status == "OUTDATED":
+                    print(f"::warning file={path},line={line}::{name}: outdated ({current} → {latest})")
+                elif status == "NOT_FOUND":
+                    print(f"::error file={path},line={line}::{name}: not found on registry")
+                    has_errors = True
+                elif status == "ERROR":
+                    print(f"::error file={path},line={line}::{name}: check failed — {detail}")
+                    has_errors = True
+
+        s = report.get("summary", {})
+        total     = s.get("total", 0)
+        ok        = s.get("OK", 0)
+        outdated  = s.get("OUTDATED", 0)
+        not_found = s.get("NOT_FOUND", 0)
+        errors    = s.get("ERROR", 0)
+
+        summary = (
+            f"## Dependency Check\n\n"
+            f"| Status | Count |\n"
+            f"|--------|-------|\n"
+            f"| ✅ OK | {ok} |\n"
+            f"| ⚠️ Outdated | {outdated} |\n"
+            f"| ❌ Not found | {not_found} |\n"
+            f"| 💥 Error | {errors} |\n"
+            f"\n**Total checked:** {total}\n"
+        )
+
+        if outdated:
+            summary += "\n### Outdated\n"
+            for file in report["files"]:
+                for r in file["results"]:
+                    if r["status"] == "OUTDATED":
+                        c = r.get("current_version") or r.get("specifier") or "?"
+                        l = r.get("latest_version") or "?"
+                        summary += f"- `{r['name']}` in `{file['path']}`: {c} → {l}\n"
+
+        step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if step_summary:
+            with open(step_summary, "a") as f:
+                f.write(summary)
+
+        sys.exit(1 if has_errors else 0)
