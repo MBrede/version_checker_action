@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: mbrede/check-deps-action@main
         with:
           path: .                              # directory to scan (default: .)
@@ -182,7 +182,7 @@ nonexistent  ==1.0        -          -          NOT_FOUND
 ── .github/workflows/ci.yml ─────────────────────────────
 Action                   Ref    Latest    Status
 ─────────────────────────────────────────────────────────
-actions/checkout         v3     v4        OUTDATED
+actions/checkout         v4     v6        OUTDATED
 actions/setup-python     v5     v5        OK
 
 Summary: 5 checked — 2 OK, 2 OUTDATED, 1 NOT_FOUND, 0 ERROR

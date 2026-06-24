@@ -1,0 +1,37 @@
+name: Check Dependencies
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'requirements**.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/**.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'requirements**.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/**.yml'
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly, Monday 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      path:
+        description: 'Directory to scan'
+        required: false
+        default: '.'
+
+jobs:
+  check-deps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./
+        with:
+          path: ${{ github.event.inputs.path || '.' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
